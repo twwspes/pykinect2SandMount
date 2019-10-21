@@ -47,13 +47,13 @@ class SandMountRuntime(object):
         self._kinect = PyKinectRuntime.PyKinectRuntime(PyKinectV2.FrameSourceTypes_Depth | PyKinectV2.FrameSourceTypes_Color)
 
         # back buffer surface for getting Kinect infrared frames, 8bit grey, width and height equal to the Kinect color frame size
-        self._frame_surface = pygame.Surface((self._kinect.depth_frame_desc.Width, self._kinect.depth_frame_desc.Height), 0, 24)
+        self._frame_surface = pygame.Surface((self.limitedWidth, self.limitedHeight), 0, 24)
         # here we will store skeleton data 
         self._bodies = None
         
         # Set the width and height of the screen [width, height]
         self._infoObject = pygame.display.Info()
-        self._screen = pygame.display.set_mode((self._kinect.depth_frame_desc.Width, self._kinect.depth_frame_desc.Height), 
+        self._screen = pygame.display.set_mode((self.limitedWidth, self.limitedHeight), 
                                                 pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.RESIZABLE, 32)
 
         pygame.display.set_caption("Kinect for Windows v2 SandMount")
@@ -94,20 +94,18 @@ class SandMountRuntime(object):
     def draw_depth_SandMount_frame(self, frame, target_surface):
         self.load_depth_frame()
         target_surface.lock()
+        # get an array of heights of any objects on top of the background, and flipping its left and right sides
         objectHeights = self.arrayOfBackgroundDepth - frame
+        objectHeights = np.reshape(objectHeights, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
+        objectHeights = np.fliplr(objectHeights)
+        objectHeights = objectHeights[self.limitedOffsetY:(self.limitedOffsetY + self.limitedHeight), self.limitedOffsetX:(self.limitedOffsetX + self.limitedWidth)]
         # if height between 0 100 then from green to yellow, if height between 100 150 then from yellow to red
         f8Red = np.uint8((objectHeights * 2.5).clip(0,250))
-        f8Red = np.reshape(f8Red, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
-        f8Red = np.fliplr(f8Red)
-        f8Red = np.reshape(f8Red, (self._kinect.depth_frame_desc.Height * self._kinect.depth_frame_desc.Width, ))
+        f8Red = np.reshape(f8Red, (self.limitedHeight * self.limitedWidth, ))
         f8Green = np.uint8((objectHeights * -3 + 750).clip(0,250))
-        f8Green = np.reshape(f8Green, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
-        f8Green = np.fliplr(f8Green)
-        f8Green = np.reshape(f8Green, (self._kinect.depth_frame_desc.Height * self._kinect.depth_frame_desc.Width, ))
+        f8Green = np.reshape(f8Green, (self.limitedHeight * self.limitedWidth, ))
         f8Blue = np.uint8((objectHeights.clip(0,1)))
-        f8Blue = np.reshape(f8Blue, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
-        f8Blue = np.fliplr(f8Blue)
-        f8Blue = np.reshape(f8Blue, (self._kinect.depth_frame_desc.Height * self._kinect.depth_frame_desc.Width,))
+        f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         frame8bit = np.dstack((f8Blue, f8Green, f8Red))
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
