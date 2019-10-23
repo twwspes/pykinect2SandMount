@@ -7,6 +7,8 @@ import _ctypes
 import pygame
 import sys
 import numpy as np
+import cv2
+
 
 
 if sys.hexversion >= 0x03000000:
@@ -23,17 +25,38 @@ SKELETON_COLORS = [pygame.color.THECOLORS["red"],
                     pygame.color.THECOLORS["yellow"], 
                     pygame.color.THECOLORS["violet"]]
 
+class WaterDrop(object):
+
+    position = np.array([150, 150])
+    velocity = np.array([0, 0])
+    acceleration = np.array([0, 0])
+    mass = 1
+
+    def applyForce(self, force):
+        f = force.astype(int) / self.mass
+        self.acceleration += f.astype(int)
+
+    def update(self):
+        self.velocity += self.acceleration
+        self.position += self.velocity
+        self.acceleration = np.array([0,0])
+
+    def setPosition(self, newPosition):
+        self.position = newPosition
+
+    def getPosition(self):
+        return self.position
 
 class SandMountRuntime(object):
 
     didBackgroundDepthSaved = True
     didBackgroundDepthLoaded = False
     arrayOfBackgroundDepth = []
-    arrayOfWaterDrop = []
     limitedOffsetX = 54
     limitedOffsetY = 63
     limitedWidth = 336
     limitedHeight = 189
+    arrayOfWaterDrop = np.zeros((int(1080/limitedHeight)*limitedHeight, int(1920/limitedWidth)*limitedWidth), dtype=np.uint8)
 
     def __init__(self):
         pygame.init()
@@ -49,13 +72,15 @@ class SandMountRuntime(object):
 
         # back buffer surface for getting Kinect infrared frames, 8bit grey, width and height equal to the Kinect color frame size
         # self._frame_surface = pygame.Surface((self.limitedWidth, self.limitedHeight), 0, 24)
-        self._frame_surface = pygame.Surface((int(1920/self.limitedWidth)*self.limitedWidth, int(1080/self.limitedHeight)*self.limitedHeight), 0, 24)
+        self._frame_surface = pygame.Surface((int(1920/self.limitedWidth)*self.limitedWidth, int(1080/self.limitedHeight)*self.limitedHeight), 0, 32)
         # here we will store skeleton data 
         self._bodies = None
         
         # Set the width and height of the screen [width, height]
         self._infoObject = pygame.display.Info()
-        self._screen = pygame.display.set_mode((int(1920/self.limitedWidth)*self.limitedWidth, int(1080/self.limitedHeight)*self.limitedHeight), 
+        # self._screen = pygame.display.set_mode((int(1920/self.limitedWidth)*self.limitedWidth, int(1080/self.limitedHeight)*self.limitedHeight), 
+        #                                         pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.FULLSCREEN, 32)
+        self._screen = pygame.display.set_mode((1920, 1080), 
                                                 pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.FULLSCREEN, 32)
         # self._screen = pygame.display.set_mode((self.limitedWidth, self.limitedHeight), 
         #                                         pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.RESIZABLE, 32)
@@ -78,6 +103,37 @@ class SandMountRuntime(object):
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
         del address
         target_surface.unlock()
+
+    def addWaterDrop(self, objectHeights, frame8bit):
+        objectHeightsfloat = np.kron(objectHeights, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
+        objectHeightsint = objectHeightsfloat.astype(int)
+        # for objHeight, cellOfWaterDrop in np.nditer([objectHeightsint, self.arrayOfWaterDrop], op_flags=['readwrite']):
+        #     if objHeight > 350 and objHeight < 400:
+        #         cellOfWaterDrop[...] +=np.uint8(20)
+        self.arrayOfWaterDrop[np.logical_and((objectHeightsint) > 350, (objectHeightsint)< 400)] += np.uint8(1)
+        WaterDepthColorBlue = np.uint8((self.arrayOfWaterDrop*10).clip(0,250))
+        WaterDepthColor = np.zeros((int(1080/self.limitedHeight)*self.limitedHeight, int(1920/self.limitedWidth)*self.limitedWidth), dtype=np.uint8)
+        f8Alphaint = np.ones((int(1080/self.limitedHeight)* self.limitedHeight, int(1920/self.limitedWidth) * self.limitedWidth, ), dtype=np.uint8)
+        Waterframe8bit = np.dstack((WaterDepthColorBlue, WaterDepthColor, WaterDepthColor, f8Alphaint))
+        frame8bit = np.reshape(frame8bit, (int(1080/self.limitedHeight)* self.limitedHeight, int(1920/self.limitedWidth) * self.limitedWidth, 4))
+        WaterCVmat = cv2.addWeighted(frame8bit, 0.5, Waterframe8bit, 0.5, 0)
+        WaterCVmat = np.reshape(WaterCVmat, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, 4))
+        return WaterCVmat
+
+    def moveWaterDrop(self, objectHeights, target_surface):
+        objectHeightsfloat = np.kron(objectHeights, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
+        objectHeightsint = objectHeightsfloat.astype(int)
+        positionY = waterDrop.getPosition()[0]
+        positionX = waterDrop.getPosition()[1]
+        objHeightsAtWaterDrop = objectHeightsint[positionY-1:positionY+2, positionX-1:positionX+2]
+        lowestHeightCoors = np.where(objHeightsAtWaterDrop == np.amin(objHeightsAtWaterDrop))
+        listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
+        waterDrop.applyForce(np.asarray(listOfCoors[0])-1)
+        waterDrop.update()
+        positionY = waterDrop.getPosition()[0]
+        positionX = waterDrop.getPosition()[1]
+        vector = pygame.Vector2(self._kinect.depth_frame_desc.Width - self.limitedOffsetX - positionX, self.limitedOffsetY + positionY)
+        pygame.draw.circle(target_surface, pygame.Color.r, vector, 3)
 
     def save_depth_frame(self, frame):
         f = open('Background', 'w+b')
@@ -116,11 +172,15 @@ class SandMountRuntime(object):
         f8Redint = np.reshape(f8Redint, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, ))
         f8Greenint = np.reshape(f8Greenint, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, ))
         f8Blueint = np.reshape(f8Blueint, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, ))
-        frame8bit = np.dstack((f8Blueint, f8Greenint, f8Redint))
+        f8Alphaint = np.ones((int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, ), dtype=np.uint8)
+        frame8bit = np.dstack((f8Blueint, f8Greenint, f8Redint, f8Alphaint))
+        frame8bit = frame8bit[0]
         # f8Red = np.reshape(f8Red, (self.limitedHeight * self.limitedWidth, ))
         # f8Green = np.reshape(f8Green, (self.limitedHeight * self.limitedWidth, ))
         # f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         # frame8bit = np.dstack((f8Blue, f8Green, f8Red))
+        frame8bit = self.addWaterDrop(objectHeights, frame8bit)
+        self.moveWaterDrop(objectHeights, target_surface)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
         del address
@@ -176,5 +236,6 @@ class SandMountRuntime(object):
 
 __main__ = "Kinect v2 InfraRed"
 game =SandMountRuntime()
+waterDrop = WaterDrop()
 game.run()
 
