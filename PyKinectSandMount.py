@@ -4,8 +4,6 @@ from pykinect2 import PyKinectRuntime
 # generate random integer values
 from random import seed
 from random import randint
-# seed random number generator
-seed(1)
 
 import ctypes
 import _ctypes
@@ -76,7 +74,7 @@ class WaterDrop(object):
             self.position[0] = 40
             reverseVelocity = True
         if reverseVelocity == True:
-            self.velocity *= -0.6
+            self.velocity *= -0.1
 
 class SandMountRuntime(object):
 
@@ -151,12 +149,20 @@ class SandMountRuntime(object):
         WaterCVmat = np.reshape(WaterCVmat, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, 4))
         return WaterCVmat
 
-    def moveWaterDrop(self, waterDrop, objectHeights, target_surface):
+    def addWaterDrop2(self, objectHeights):
+        objectHeightsint = objectHeights.astype(int)
+        lowestHeightCoors = np.asarray(np.logical_and((objectHeightsint) > 350, (objectHeightsint)< 400)).nonzero()
+        listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
+        for coors in listOfCoors:
+            # waterDrops.append(WaterDrop(coors[0].clip(40, 165), coors[1].clip(70, 275), 1))
+            waterDrops.append(WaterDrop(100, 100, 1))
+
+    def moveWaterDrop(self, waterDrop, objectHeights, target_surface, index):
 
         # Friction = -1 * coefForce * normalForce * velocity
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
         coefFric = 0.01 # coefficient of friction
-        normalForce = 30 # normal force, which is perpendicluar to the surface
+        normalForce = 50 # normal force, which is perpendicluar to the surface
         frictionMag = coefFric * normalForce
         friction = np.array([waterDrop.getVelocity()[0]*-1, waterDrop.getVelocity()[1]*-1], dtype=float)
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
@@ -171,11 +177,14 @@ class SandMountRuntime(object):
         objectHeightsint = objectHeights.astype(int)
         positionY = waterDrop.getPosition()[0]
         positionX = waterDrop.getPosition()[1]
+        # print("position X : % 3d, Y : % 2d" %(positionX, positionY))
         objHeightsAtWaterDrop = objectHeightsint[positionY-1:positionY+2, positionX-1:positionX+2]
         lowestHeightCoors = np.where(objHeightsAtWaterDrop == np.amin(objHeightsAtWaterDrop))
         listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
 
         # set the waterDrop move
+        # seed random number generator
+        seed(index)
         waterDrop.applyForce(friction)
         waterDrop.applyForce(np.asarray(listOfCoors[randint(0, len(listOfCoors)-1)])-1)
         waterDrop.update()
@@ -236,11 +245,12 @@ class SandMountRuntime(object):
         # f8Green = np.reshape(f8Green, (self.limitedHeight * self.limitedWidth, ))
         # f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         # frame8bit = np.dstack((f8Blue, f8Green, f8Red))
-        frame8bit = self.addWaterDrop(objectHeights, frame8bit)
+        # frame8bit = self.addWaterDrop(objectHeights, frame8bit)
+        self.addWaterDrop2(objectHeights)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
-        for waterDrop in waterDrops:
-            self.moveWaterDrop(waterDrop, objectHeights, target_surface)
+        for i, waterDrop in enumerate(waterDrops):
+            self.moveWaterDrop(waterDrop, objectHeights, target_surface, i)
         del address
         target_surface.unlock()
         
@@ -293,7 +303,7 @@ class SandMountRuntime(object):
         pygame.quit()
 
 
-__main__ = "Kinect v2 InfraRed"
+__main__ = "Kinect Sand Mount"
 game =SandMountRuntime()
 for i in range(2, 7):
     waterDrops.append(WaterDrop(40*i, 70, 1))
