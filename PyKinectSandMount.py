@@ -30,12 +30,18 @@ SKELETON_COLORS = [pygame.color.THECOLORS["red"],
                     pygame.color.THECOLORS["yellow"], 
                     pygame.color.THECOLORS["violet"]]
 
+waterDrops = []
+
 class WaterDrop(object):
 
     position = np.array([70, 220])
     velocity = np.array([0, 0], float)
     acceleration = np.array([0, 0], float)
     mass = 1
+
+    def __init__(self, x, y, mass):
+        self.position = np.array([y, x])
+        self.mass = mass
 
     def applyForce(self, force):
         f = force / self.mass
@@ -145,12 +151,12 @@ class SandMountRuntime(object):
         WaterCVmat = np.reshape(WaterCVmat, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, 4))
         return WaterCVmat
 
-    def moveWaterDrop(self, objectHeights, target_surface):
+    def moveWaterDrop(self, waterDrop, objectHeights, target_surface):
 
         # Friction = -1 * coefForce * normalForce * velocity
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
         coefFric = 0.01 # coefficient of friction
-        normalForce = 50 # normal force, which is perpendicluar to the surface
+        normalForce = 30 # normal force, which is perpendicluar to the surface
         frictionMag = coefFric * normalForce
         friction = np.array([waterDrop.getVelocity()[0]*-1, waterDrop.getVelocity()[1]*-1], dtype=float)
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
@@ -233,7 +239,8 @@ class SandMountRuntime(object):
         frame8bit = self.addWaterDrop(objectHeights, frame8bit)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
-        self.moveWaterDrop(objectHeights, target_surface)
+        for waterDrop in waterDrops:
+            self.moveWaterDrop(waterDrop, objectHeights, target_surface)
         del address
         target_surface.unlock()
         
@@ -251,7 +258,8 @@ class SandMountRuntime(object):
                         #self._screen = pygame.display.set_mode((1920, 1080), pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.FULLSCREEN, 32)
                         self._done = True # Flag that we are done so we exit this loop
                     if event.key == pygame.K_f: # If user press Keyboard f
-                        waterDrop.setPosition(np.array([70, 220]))
+                        for i, waterDrop in enumerate(waterDrops):
+                            waterDrop.setPosition(np.array([70, (40*i)+80]))
                     if event.key == pygame.K_a: # If user press Keyboard a
                         self.didBackgroundDepthSaved = False
 
@@ -287,6 +295,7 @@ class SandMountRuntime(object):
 
 __main__ = "Kinect v2 InfraRed"
 game =SandMountRuntime()
-waterDrop = WaterDrop()
+for i in range(2, 7):
+    waterDrops.append(WaterDrop(40*i, 70, 1))
 game.run()
 
