@@ -1,6 +1,11 @@
 from pykinect2 import PyKinectV2
 from pykinect2.PyKinectV2 import *
 from pykinect2 import PyKinectRuntime
+# generate random integer values
+from random import seed
+from random import randint
+# seed random number generator
+seed(1)
 
 import ctypes
 import _ctypes
@@ -27,25 +32,45 @@ SKELETON_COLORS = [pygame.color.THECOLORS["red"],
 
 class WaterDrop(object):
 
-    position = np.array([150, 150])
-    velocity = np.array([0, 0])
-    acceleration = np.array([0, 0])
+    position = np.array([70, 220])
+    velocity = np.array([0, 0], float)
+    acceleration = np.array([0, 0], float)
     mass = 1
 
     def applyForce(self, force):
-        f = force.astype(int) / self.mass
-        self.acceleration += f.astype(int)
+        f = force / self.mass
+        self.acceleration += f
 
     def update(self):
         self.velocity += self.acceleration
-        self.position += self.velocity
-        self.acceleration = np.array([0,0])
+        self.position += self.velocity.astype(int)
+        self.acceleration = np.array([0,0], float)
 
     def setPosition(self, newPosition):
         self.position = newPosition
 
     def getPosition(self):
         return self.position
+
+    def getVelocity(self):
+        return self.velocity
+
+    def checkEdge(self):
+        reverseVelocity = False
+        if self.position[1] > 270:
+            self.position[1] = 270
+            reverseVelocity = True
+        elif self.position[1] < 70:
+            self.position[1] = 70
+            reverseVelocity = True
+        if self.position[0] > 165:
+            self.position[0] = 165
+            reverseVelocity = True
+        elif self.position[0] < 40:
+            self.position[0] = 40
+            reverseVelocity = True
+        if reverseVelocity == True:
+            self.velocity *= -0.6
 
 class SandMountRuntime(object):
 
@@ -121,19 +146,45 @@ class SandMountRuntime(object):
         return WaterCVmat
 
     def moveWaterDrop(self, objectHeights, target_surface):
-        objectHeightsfloat = np.kron(objectHeights, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
-        objectHeightsint = objectHeightsfloat.astype(int)
+
+        # Friction = -1 * coefForce * normalForce * velocity
+        # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
+        coefFric = 0.01 # coefficient of friction
+        normalForce = 50 # normal force, which is perpendicluar to the surface
+        frictionMag = coefFric * normalForce
+        friction = np.array([waterDrop.getVelocity()[0]*-1, waterDrop.getVelocity()[1]*-1], dtype=float)
+        # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
+        normBase = np.linalg.norm(friction, ord=2, axis=0, keepdims=True)
+        normBase = 1 if normBase == 0 else normBase
+        friction = friction/normBase
+        friction *= frictionMag
+
+        # Calculating vector of waterDrop by using objectHeights
+        # print("fric X : % 3d, Y : % 2d ; Velo X : % 3d, Y : % 2d" %(friction[1], friction[0], waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
+        # objectHeightsfloat = np.kron(objectHeights, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
+        objectHeightsint = objectHeights.astype(int)
         positionY = waterDrop.getPosition()[0]
         positionX = waterDrop.getPosition()[1]
         objHeightsAtWaterDrop = objectHeightsint[positionY-1:positionY+2, positionX-1:positionX+2]
         lowestHeightCoors = np.where(objHeightsAtWaterDrop == np.amin(objHeightsAtWaterDrop))
         listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
-        waterDrop.applyForce(np.asarray(listOfCoors[0])-1)
+
+        # set the waterDrop move
+        waterDrop.applyForce(friction)
+        waterDrop.applyForce(np.asarray(listOfCoors[randint(0, len(listOfCoors)-1)])-1)
         waterDrop.update()
+
+        # Drawing on the surface
         positionY = waterDrop.getPosition()[0]
         positionX = waterDrop.getPosition()[1]
-        vector = pygame.Vector2(self._kinect.depth_frame_desc.Width - self.limitedOffsetX - positionX, self.limitedOffsetY + positionY)
-        pygame.draw.circle(target_surface, pygame.Color.r, vector, 3)
+        centerX = int(positionX * int(1920/self.limitedWidth))
+        centerY = int(positionY * int(1080/self.limitedHeight))
+        center = [centerX, centerY]
+        # print("Position X : % 3d, Y : % 2d; Velo X : % 3d, Y : % 2d; Altitute: % 2d" %(positionX, positionY, waterDrop.getVelocity()[1], waterDrop.getVelocity()[0], np.amin(objHeightsAtWaterDrop)))
+        pygame.draw.circle(target_surface, (0, 0, 0), center, 10)
+
+        # if the waterDrop hit against a wall, it will bounce back
+        waterDrop.checkEdge()
 
     def save_depth_frame(self, frame):
         f = open('Background', 'w+b')
@@ -180,9 +231,9 @@ class SandMountRuntime(object):
         # f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         # frame8bit = np.dstack((f8Blue, f8Green, f8Red))
         frame8bit = self.addWaterDrop(objectHeights, frame8bit)
-        self.moveWaterDrop(objectHeights, target_surface)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
+        self.moveWaterDrop(objectHeights, target_surface)
         del address
         target_surface.unlock()
         
@@ -200,7 +251,7 @@ class SandMountRuntime(object):
                         #self._screen = pygame.display.set_mode((1920, 1080), pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.FULLSCREEN, 32)
                         self._done = True # Flag that we are done so we exit this loop
                     if event.key == pygame.K_f: # If user press Keyboard f
-                        self._screen = pygame.display.set_mode((1920, 1080), pygame.HWSURFACE|pygame.DOUBLEBUF|pygame.FULLSCREEN, 32)
+                        waterDrop.setPosition(np.array([70, 220]))
                     if event.key == pygame.K_a: # If user press Keyboard a
                         self.didBackgroundDepthSaved = False
 
