@@ -31,6 +31,8 @@ class WaterDrop(object):
     def __init__(self, x, y, mass):
         self._position = np.array([y, x])
         self._mass = mass
+        self._velocity = np.array([0, 0], float)
+        self._acceleration = np.array([0, 0], float)
 
     def applyForce(self, force):
         f = force / self._mass
@@ -76,7 +78,7 @@ class SandMountRuntime(object):
     limitedOffsetY = 63
     limitedWidth = 336
     limitedHeight = 189
-    arrayOfWaterDrop = np.zeros((int(1080/limitedHeight)*limitedHeight, int(1920/limitedWidth)*limitedWidth), dtype=np.uint8)
+    arrayOfWaterDrop = np.zeros((limitedHeight, limitedWidth), dtype=np.uint8)
 
     def __init__(self):
         pygame.init()
@@ -125,20 +127,64 @@ class SandMountRuntime(object):
         target_surface.unlock()
 
     def addWaterDrop(self, objectHeights, frame8bit):
-        objectHeightsfloat = np.kron(objectHeights, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
-        objectHeightsint = objectHeightsfloat.astype(int)
+        objectHeightsint = objectHeights.astype(int)
         # for objHeight, cellOfWaterDrop in np.nditer([objectHeightsint, self.arrayOfWaterDrop], op_flags=['readwrite']):
         #     if objHeight > 350 and objHeight < 400:
         #         cellOfWaterDrop[...] +=np.uint8(20)
         self.arrayOfWaterDrop[np.logical_and((objectHeightsint) > 350, (objectHeightsint)< 400)] += np.uint8(1)
+
         WaterDepthColorBlue = np.uint8((self.arrayOfWaterDrop*10).clip(0,250))
+        WaterDepthColorBlue = np.kron(WaterDepthColorBlue, np.ones((int(1080/self.limitedHeight), int(1920/self.limitedWidth))))
+        WaterDepthColorBlueint = WaterDepthColorBlue.astype(np.uint8)
         WaterDepthColor = np.zeros((int(1080/self.limitedHeight)*self.limitedHeight, int(1920/self.limitedWidth)*self.limitedWidth), dtype=np.uint8)
         f8Alphaint = np.ones((int(1080/self.limitedHeight)* self.limitedHeight, int(1920/self.limitedWidth) * self.limitedWidth, ), dtype=np.uint8)
-        Waterframe8bit = np.dstack((WaterDepthColorBlue, WaterDepthColor, WaterDepthColor, f8Alphaint))
+        Waterframe8bit = np.dstack((WaterDepthColorBlueint, WaterDepthColor, WaterDepthColor, f8Alphaint))
         frame8bit = np.reshape(frame8bit, (int(1080/self.limitedHeight)* self.limitedHeight, int(1920/self.limitedWidth) * self.limitedWidth, 4))
         WaterCVmat = cv2.addWeighted(frame8bit, 0.5, Waterframe8bit, 0.5, 0)
         WaterCVmat = np.reshape(WaterCVmat, (int(1080/self.limitedHeight)* self.limitedHeight * int(1920/self.limitedWidth) * self.limitedWidth, 4))
         return WaterCVmat
+
+    def moveWaterDrop(self, objectHeights):
+        objectHeightsint = objectHeights.astype(int)
+        for y in range(40, objectHeights.shape[0]-10):
+            for x in range(40, objectHeights.shape[1]-10):
+                objHeightsAtWaterDrop = objectHeightsint[y-1:y+2, x-1:x+2]
+                waterDepth = self.arrayOfWaterDrop[y-1:y+2, x-1:x+2]
+                sumWaterDepth = waterDepth.sum()
+                if sumWaterDepth > 0:
+                    whichMatrixRemoved = [1,1,1,1,1,1,1,1,1]
+                    averageHeight = 0
+                    # isMatrixRemoved = False
+                    notWaterDropDistributed = True
+                    while notWaterDropDistributed:
+                        notMatrixRemoved = True
+                        sumWhichMatrixRemoved = sum(whichMatrixRemoved)
+                        sumObjHeightAtWaterDrop = objHeightsAtWaterDrop.sum()
+                        averageHeight = (sumObjHeightAtWaterDrop + sumWaterDepth) / (sumWhichMatrixRemoved if sumWhichMatrixRemoved != 0 else 1)
+                        for i in range(0, 9):
+                            n = int(i/3)
+                            m = int(i%3)
+                            if averageHeight < objHeightsAtWaterDrop[n, m]:
+                                objHeightsAtWaterDrop[n, m] = 0
+                                notMatrixRemoved = False
+                                whichMatrixRemoved[i] = 0
+                        if notMatrixRemoved:
+                            sumWaterDropDistributed = 0
+                            for i in range(0, 9):
+                                n = int(i/3)
+                                m = int(i%3)
+                                if whichMatrixRemoved[i] == 1:
+                                    self.arrayOfWaterDrop[y+n-1, x+m-1] = np.uint8(averageHeight - objHeightsAtWaterDrop[n, m])
+                                    sumWaterDropDistributed += averageHeight - objHeightsAtWaterDrop[n, m]
+                                else:
+                                    self.arrayOfWaterDrop[y+n-1, x+m-1] = np.uint8(0)
+                            remainingWater = sumWaterDepth - sumWaterDropDistributed
+                            seed(1)
+                            random = randint(0,8)
+                            self.arrayOfWaterDrop[y+int(random/3)-1, x+int(random%3)-1] += np.uint8(remainingWater if remainingWater >=0 else 0)
+                            notWaterDropDistributed = False
+
+
 
     def addWaterDrop2(self, objectHeights):
         objectHeightsint = objectHeights.astype(int)
@@ -146,14 +192,14 @@ class SandMountRuntime(object):
         listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
         for coors in listOfCoors:
             # waterDrops.append(WaterDrop(coors[0].clip(40, 165), coors[1].clip(70, 275), 1))
-            waterDrops.append(WaterDrop(100, 100, 1))
+            waterDrops.append(WaterDrop(240, 70, 1))
 
-    def moveWaterDrop(self, waterDrop, objectHeights, target_surface, index):
+    def moveWaterDrop2(self, waterDrop, objectHeights, target_surface, index):
 
         # Friction = -1 * coefForce * normalForce * velocity
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
         coefFric = 0.01 # coefficient of friction
-        normalForce = 30 # normal force, which is perpendicluar to the surface
+        normalForce = 40 # normal force, which is perpendicluar to the surface
         frictionMag = coefFric * normalForce
         friction = np.array([waterDrop.getVelocity()[0]*-1, waterDrop.getVelocity()[1]*-1], dtype=float)
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
@@ -170,8 +216,12 @@ class SandMountRuntime(object):
         positionX = waterDrop.getPosition()[1]
         # print("position X : % 3d, Y : % 2d" %(positionX, positionY))
         objHeightsAtWaterDrop = objectHeightsint[positionY-1:positionY+2, positionX-1:positionX+2]
-        lowestHeightCoors = np.where(objHeightsAtWaterDrop == np.amin(objHeightsAtWaterDrop))
-        listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
+        listOfCoors = []
+        try:
+            lowestHeightCoors = np.where(objHeightsAtWaterDrop == np.amin(objHeightsAtWaterDrop))
+            listOfCoors = list(zip(lowestHeightCoors[0], lowestHeightCoors[1]))
+        except:
+            listOfCoors = ((0,0))
 
         # set the waterDrop move
         # seed random number generator
@@ -210,7 +260,7 @@ class SandMountRuntime(object):
             self.didBackgroundDepthLoaded = True
 
     def opencvProcessing(self, objectHeights):
-        objectHeights = cv2.morphologyEx(objectHeights, cv2.MORPH_CLOSE, np.ones((7,7), np.uint16))
+        objectHeights = cv2.morphologyEx(objectHeights, cv2.MORPH_OPEN, np.ones((5,5), np.uint16))
         return objectHeights
 
     def draw_depth_SandMount_frame(self, frame, target_surface):
@@ -218,7 +268,7 @@ class SandMountRuntime(object):
         target_surface.lock()
         frame = self.opencvProcessing(frame)
         # get an array of heights (np.uint16) of any objects on top of the background, and flipping its left and right sides
-        objectHeights = self.arrayOfBackgroundDepth - frame + 70
+        objectHeights = self.arrayOfBackgroundDepth - frame + 90
         objectHeights = np.reshape(objectHeights, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
         objectHeights = np.fliplr(objectHeights)
         objectHeights = objectHeights[self.limitedOffsetY:(self.limitedOffsetY + self.limitedHeight), self.limitedOffsetX:(self.limitedOffsetX + self.limitedWidth)]
@@ -243,13 +293,14 @@ class SandMountRuntime(object):
         # f8Green = np.reshape(f8Green, (self.limitedHeight * self.limitedWidth, ))
         # f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         # frame8bit = np.dstack((f8Blue, f8Green, f8Red))
-        # frame8bit = self.addWaterDrop(objectHeights, frame8bit)
+        frame8bit = self.addWaterDrop(objectHeights, frame8bit)
+        self.moveWaterDrop(objectHeights)
         # self.addWaterDrop2(objectHeights)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
-        for i, waterDrop in enumerate(waterDrops):
-            self.moveWaterDrop(waterDrop, objectHeights, target_surface, i)
-        del address
+        # for i, waterDrop in enumerate(waterDrops):
+        #     self.moveWaterDrop2(waterDrop, objectHeights, target_surface, i)
+        # del address
         target_surface.unlock()
 
     def run(self):
@@ -268,6 +319,13 @@ class SandMountRuntime(object):
                         for i, waterDrop in enumerate(waterDrops):
                             seed(1)
                             waterDrop.setPosition(np.array([70, 240]))
+                    if event.key == pygame.K_s: # If user press Keyboard f
+                        waterDrops.append(WaterDrop(240, 60, 1))
+                    if event.key == pygame.K_d: # If user press Keyboard f
+                        waterDrops.pop()
+                    if event.key == pygame.K_w: # If user press Keyboard f
+                        waterDrops.clear()
+                        np.delete(self.arrayOfWaterDrop, 0)
                     if event.key == pygame.K_a: # If user press Keyboard a
                         self.didBackgroundDepthSaved = False
 
@@ -304,6 +362,6 @@ class SandMountRuntime(object):
 __main__ = "Kinect Sand Mount"
 game =SandMountRuntime()
 for i in range(2, 3):
-    waterDrops.append(WaterDrop(220, 60, 1))
+    waterDrops.append(WaterDrop(240, 60, 1))
 game.run()
 
