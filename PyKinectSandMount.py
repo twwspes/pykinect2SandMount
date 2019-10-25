@@ -19,62 +19,53 @@ if sys.hexversion >= 0x03000000:
 else:
     import thread
 
-# colors for drawing different bodies 
-SKELETON_COLORS = [pygame.color.THECOLORS["red"],
-                    pygame.color.THECOLORS["blue"], 
-                    pygame.color.THECOLORS["green"],
-                    pygame.color.THECOLORS["orange"], 
-                    pygame.color.THECOLORS["purple"], 
-                    pygame.color.THECOLORS["yellow"], 
-                    pygame.color.THECOLORS["violet"]]
-
 waterDrops = []
 
 class WaterDrop(object):
 
-    position = np.array([70, 220])
-    velocity = np.array([0, 0], float)
-    acceleration = np.array([0, 0], float)
-    mass = 1
+    _position = np.array([70, 220])
+    _velocity = np.array([0, 0], float)
+    _acceleration = np.array([0, 0], float)
+    _mass = 1
 
     def __init__(self, x, y, mass):
-        self.position = np.array([y, x])
-        self.mass = mass
+        self._position = np.array([y, x])
+        self._mass = mass
 
     def applyForce(self, force):
-        f = force / self.mass
-        self.acceleration += f
+        f = force / self._mass
+        self._acceleration += f
 
     def update(self):
-        self.velocity += self.acceleration
-        self.position += self.velocity.astype(int)
-        self.acceleration = np.array([0,0], float)
+        self._velocity += self._acceleration
+        self._position += self._velocity.astype(int)
+        self._acceleration = np.array([0,0], float)
 
     def setPosition(self, newPosition):
-        self.position = newPosition
+        self._position = newPosition
 
     def getPosition(self):
-        return self.position
+        return self._position
 
     def getVelocity(self):
-        return self.velocity
+        return self._velocity
 
     def checkEdge(self):
         reverseVelocity = False
-        if self.position[1] > 270:
-            self.position[1] = 270
+        if self._position[1] > 270:
+            self._position[1] = 270
             reverseVelocity = True
-        elif self.position[1] < 70:
-            self.position[1] = 70
+        elif self._position[1] < 70:
+            self._position[1] = 70
             reverseVelocity = True
-        if self.position[0] > 165:
-            self.position[0] = 165
+        if self._position[0] > 165:
+            self._position[0] = 165
             reverseVelocity = True
-        elif self.position[0] < 40:
-            self.position[0] = 40
+        elif self._position[0] < 40:
+            self._position[0] = 40
             reverseVelocity = True
         if reverseVelocity == True:
-            self.velocity *= -0.1
+            self._velocity *= -0.1
 
 class SandMountRuntime(object):
 
@@ -162,7 +153,7 @@ class SandMountRuntime(object):
         # Friction = -1 * coefForce * normalForce * velocity
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
         coefFric = 0.01 # coefficient of friction
-        normalForce = 50 # normal force, which is perpendicluar to the surface
+        normalForce = 30 # normal force, which is perpendicluar to the surface
         frictionMag = coefFric * normalForce
         friction = np.array([waterDrop.getVelocity()[0]*-1, waterDrop.getVelocity()[1]*-1], dtype=float)
         # print("Velo X : % 3d, Y : % 2d" %(waterDrop.getVelocity()[1], waterDrop.getVelocity()[0]))
@@ -212,19 +203,26 @@ class SandMountRuntime(object):
         if self.didBackgroundDepthLoaded == False:
             f=open('Background',"rb")
             self.arrayOfBackgroundDepth = np.frombuffer(f.read(), dtype=np.uint16)
+            self.arrayOfBackgroundDepth = self.opencvProcessing(self.arrayOfBackgroundDepth)
             print("arrayOfBackgroundDepth")
             print(self.arrayOfBackgroundDepth)
             f.close()
             self.didBackgroundDepthLoaded = True
 
+    def opencvProcessing(self, objectHeights):
+        objectHeights = cv2.morphologyEx(objectHeights, cv2.MORPH_CLOSE, np.ones((7,7), np.uint16))
+        return objectHeights
+
     def draw_depth_SandMount_frame(self, frame, target_surface):
         self.load_depth_frame()
         target_surface.lock()
-        # get an array of heights of any objects on top of the background, and flipping its left and right sides
+        frame = self.opencvProcessing(frame)
+        # get an array of heights (np.uint16) of any objects on top of the background, and flipping its left and right sides
         objectHeights = self.arrayOfBackgroundDepth - frame + 70
         objectHeights = np.reshape(objectHeights, (self._kinect.depth_frame_desc.Height, self._kinect.depth_frame_desc.Width))
         objectHeights = np.fliplr(objectHeights)
         objectHeights = objectHeights[self.limitedOffsetY:(self.limitedOffsetY + self.limitedHeight), self.limitedOffsetX:(self.limitedOffsetX + self.limitedWidth)]
+        objectHeights = self.opencvProcessing(objectHeights)
         # if height between 0 50 then from green to yellow, if height between 50 100 then from yellow to red
         f8Red = np.uint8((objectHeights * 50/18).clip(0,250))
         f8Green = np.uint8((objectHeights * -3 + 500).clip(0,250))
@@ -246,14 +244,13 @@ class SandMountRuntime(object):
         # f8Blue = np.reshape(f8Blue, (self.limitedHeight * self.limitedWidth,))
         # frame8bit = np.dstack((f8Blue, f8Green, f8Red))
         # frame8bit = self.addWaterDrop(objectHeights, frame8bit)
-        self.addWaterDrop2(objectHeights)
+        # self.addWaterDrop2(objectHeights)
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
         for i, waterDrop in enumerate(waterDrops):
             self.moveWaterDrop(waterDrop, objectHeights, target_surface, i)
         del address
         target_surface.unlock()
-        
 
     def run(self):
         # -------- Main Program Loop -----------
@@ -269,7 +266,8 @@ class SandMountRuntime(object):
                         self._done = True # Flag that we are done so we exit this loop
                     if event.key == pygame.K_f: # If user press Keyboard f
                         for i, waterDrop in enumerate(waterDrops):
-                            waterDrop.setPosition(np.array([70, (40*i)+80]))
+                            seed(1)
+                            waterDrop.setPosition(np.array([70, 240]))
                     if event.key == pygame.K_a: # If user press Keyboard a
                         self.didBackgroundDepthSaved = False
 
@@ -305,7 +303,7 @@ class SandMountRuntime(object):
 
 __main__ = "Kinect Sand Mount"
 game =SandMountRuntime()
-for i in range(2, 7):
-    waterDrops.append(WaterDrop(40*i, 70, 1))
+for i in range(2, 3):
+    waterDrops.append(WaterDrop(220, 60, 1))
 game.run()
 
